@@ -14,10 +14,10 @@ export const getAddressSuggestions = async (query: string, context?: string): Pr
   try {
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
-      contents: `Lista 5 direcciones reales para: "${query}"${contextStr}. Solo las direcciones postales.`,
+      contents: `Lista exactamente 5 direcciones postales reales que existan para la búsqueda: "${query}"${contextStr}. Solo devuelve las direcciones, una por línea.`,
       config: {
         tools: [{ googleMaps: {} }],
-        systemInstruction: "Eres un buscador de direcciones preciso."
+        systemInstruction: "Eres un motor de búsqueda de direcciones postales precisas."
       },
     });
     const text = response.text || "";
@@ -40,18 +40,26 @@ export const getOrderDetails = async (
   try {
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
-      contents: `Detalles logísticos y COORDENADAS para: "${address}". Base: "${hqLocation}". Formato COORDS: [lat, lng]`,
+      contents: `Proporciona las COORDENADAS GEOGRÁFICAS EXACTAS para la dirección: "${address}". 
+      Responde siguiendo estrictamente este formato al final de tu respuesta:
+      COORDS: [latitud, longitud]
+      Ejemplo: COORDS: [-37.3214, -59.1345]`,
       config: {
         tools: [{ googleMaps: {} }],
-        systemInstruction: "Analista logístico. Siempre incluye COORDS: [lat, lng]."
+        systemInstruction: "Eres un experto en geolocalización logística. Tu prioridad absoluta es encontrar la latitud y longitud exacta."
       },
     });
 
     const text = response.text || "";
-    const coordsMatch = text.match(/COORDS:\s*\[\s*(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)\s*\]/i);
+    // Regex mejorada para capturar coordenadas con o sin corchetes, espacios y signos
+    const coordsMatch = text.match(/COORDS:\s*\[?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]?/i);
+    
     let coordinates;
     if (coordsMatch) {
-      coordinates = { lat: parseFloat(coordsMatch[1]), lng: parseFloat(coordsMatch[2]) };
+      coordinates = { 
+        lat: parseFloat(coordsMatch[1]), 
+        lng: parseFloat(coordsMatch[2]) 
+      };
     }
 
     const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
@@ -69,6 +77,7 @@ export const getOrderDetails = async (
       sources
     };
   } catch (error) {
+    console.error("Error en getOrderDetails:", error);
     throw error;
   }
 };
@@ -83,29 +92,25 @@ export const optimizeDeliveryRoute = async (
 ): Promise<{ routeDescription: string; sources: GroundingSource[] }> => {
   if (orders.length === 0) return { routeDescription: "", sources: [] };
 
-  // Construimos una descripción técnica detallada para la IA basada en datos de OSRM
   const routeData = orders.map((o, i) => 
-    `PARADA ${i+1}: ${o.name} (A ${o.distanceFromRef} y ${o.travelTime} desde el punto anterior)`
+    `PARADA ${i+1}: ${o.name} (Distancia: ${o.distanceFromRef}, Tiempo estimado: ${o.travelTime})`
   ).join('\n');
 
   const contextPrompt = cargoType === 'homogénea' 
-    ? "CARGA DE BIDONES (Agua/Soda): Producto idéntico. Priorizar velocidad de parada."
-    : "CARGA DE PAQUETES: Items individuales. El orden de carga en el camión debe ser el inverso al de entrega (LIFO).";
+    ? "LOGÍSTICA DE BIDONES: Todos los productos son iguales. El tiempo de descarga es constante."
+    : "LOGÍSTICA DE PAQUETES: Productos distintos. Cargar el camión en orden LIFO (Last In, First Out).";
 
-  const prompt = `Actúa como Jefe de Logística. Genera la HOJA DE DESPACHO basada en estos DATOS REALES DE RUTA:
-  BASE: "${hqName}"
-  TIPO DE CARGA: ${contextPrompt}
+  const prompt = `Genera una HOJA DE RUTA profesional para un conductor de reparto.
+  BASE DE SALIDA: "${hqName}"
+  CONFIGURACIÓN: ${contextPrompt}
   
-  SECUENCIA CALCULADA POR GPS:
+  ITINERARIO CALCULADO:
   ${routeData}
 
-  INSTRUCCIONES:
-  1. No inventes distancias, usa las proporcionadas.
-  2. Usa Google Search para buscar "tráfico en Tandil" o incidentes en las calles mencionadas.
-  3. Formato:
-     - RESUMEN DE RUTA (Tiempos totales)
-     - ORDEN DE ESTIBA (Instrucciones de carga en el vehículo)
-     - ALERTAS DE CALLE (Basado en búsqueda real)`;
+  REQUISITOS DEL INFORME:
+  - Estilo telegráfico y técnico.
+  - Usa datos de Google Search para avisar sobre el tráfico actual en la zona de Tandil/Buenos Aires si es relevante.
+  - Incluye una sección de 'CONSEJOS DE CARGA' basada en el tipo de producto.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -113,11 +118,11 @@ export const optimizeDeliveryRoute = async (
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
-        systemInstruction: "Eres un despachador logístico. No saludas. Vas directo a la información técnica."
+        systemInstruction: "Eres un despachador de logística senior. Tu lenguaje es directo, profesional y enfocado a la eficiencia."
       },
     });
 
-    const text = response.text || "Error al procesar hoja de despacho.";
+    const text = response.text || "No se pudo generar la hoja de despacho.";
     const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
     const sources: GroundingSource[] = groundingChunks
       .filter(chunk => chunk.web)
@@ -125,6 +130,6 @@ export const optimizeDeliveryRoute = async (
 
     return { routeDescription: text, sources };
   } catch (error) {
-    return { routeDescription: "⚠️ Error en centro de mando.", sources: [] };
+    return { routeDescription: "⚠️ Error en la conexión con el centro de mando logístico.", sources: [] };
   }
 };

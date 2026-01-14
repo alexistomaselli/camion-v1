@@ -1,0 +1,7 @@
+{
+  "name": "AquaFlow Logistics",
+  "description": "Optimizador de rutas de reparto de agua potable. Gestión inteligente de pedidos y logística urbana.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
